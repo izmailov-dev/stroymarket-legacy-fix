@@ -1,6 +1,31 @@
 <?php
 include 'config.php';
 $t_start = microtime(true);
+
+$q   = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+$cat = filter_input(INPUT_GET, 'cat', FILTER_VALIDATE_INT);
+
+$cats = mysqli_query($link, "SELECT id, name FROM categories ORDER BY id");
+
+// Один запрос вместо 101: категория через JOIN, отзывы подсчётом по индексу
+$base = "SELECT p.id, p.art, p.name, p.price, c.name AS cat_name,
+                (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.id) AS cnt
+         FROM products p
+         LEFT JOIN categories c ON c.id = p.cat_id";
+
+// Данные пользователя идут в запрос только через параметры, не склейкой строк
+if ($q !== '') {
+    $like = '%' . addcslashes($q, '%_\\') . '%';
+    $stmt = mysqli_prepare($link, "$base WHERE p.name LIKE ? OR p.descr LIKE ?");
+    mysqli_stmt_bind_param($stmt, 'ss', $like, $like);
+} elseif ($cat) {
+    $stmt = mysqli_prepare($link, "$base WHERE p.cat_id = ?");
+    mysqli_stmt_bind_param($stmt, 'i', $cat);
+} else {
+    $stmt = mysqli_prepare($link, "$base ORDER BY p.id LIMIT 50");
+}
+mysqli_stmt_execute($stmt);
+$res = mysqli_stmt_get_result($stmt);
 ?>
 <!DOCTYPE html>
 <html>
@@ -23,58 +48,30 @@ th { background: #eee; }
 <h1>СтройМаркет</h1>
 
 <form method="get">
-    Поиск: <input type="text" name="q" value="<?php if (isset($_GET['q'])) echo $_GET['q']; ?>" size="40">
+    Поиск: <input type="text" name="q" value="<?= e($q) ?>" size="40">
   <input type="submit" value="Найти">
 </form>
 
 <p>
-<?php
-$cats = mysqli_query($link, "SELECT * FROM categories");
-while ($c = mysqli_fetch_assoc($cats)) {
-    echo '<span class="cat"><a href="?cat=' . $c['id'] . '">' . $c['name'] . '</a></span>';
-}
-?>
+<?php while ($c = mysqli_fetch_assoc($cats)): ?>
+    <span class="cat"><a href="?cat=<?= (int)$c['id'] ?>"><?= e($c['name']) ?></a></span>
+<?php endwhile; ?>
 </p>
 
-<?php
-if (isset($_GET['q'])) {
-    $q = $_GET['q'];
-    $sql = "SELECT * FROM products WHERE name LIKE '%$q%' OR descr LIKE '%$q%'";
-} elseif (isset($_GET['cat'])) {
-    $cat = $_GET['cat'];
-    $sql = "SELECT * FROM products WHERE cat_id = $cat";
-} else {
-    $sql = "SELECT * FROM products LIMIT 50";
-}
-
-$res = mysqli_query($link, $sql);
-if (!$res) {
-    echo '<p style="color:red">Ошибка запроса: ' . mysqli_error($link) . '</p>';
-    echo '<p style="color:#999">SQL: ' . $sql . '</p>';
-} else {
-    echo '<table><tr><th>Артикул</th><th>Наименование</th><th>Категория</th><th>Отзывов</th><th>Цена</th></tr>';
-    while ($row = mysqli_fetch_assoc($res)) {
-
-        $cq = mysqli_query($link, "SELECT name FROM categories WHERE id = " . $row['cat_id']);
-        $cat_row = mysqli_fetch_assoc($cq);
-
-        $rq = mysqli_query($link, "SELECT COUNT(*) as cnt FROM reviews WHERE product_id = " . $row['id']);
-        $rev = mysqli_fetch_assoc($rq);
-
-        echo '<tr>';
-        echo '<td>' . $row['art'] . '</td>';
-        echo '<td><a href="product.php?id=' . $row['id'] . '">' . $row['name'] . '</a></td>';
-        echo '<td>' . $cat_row['name'] . '</td>';
-        echo '<td>' . $rev['cnt'] . '</td>';
-        echo '<td>' . $row['price'] . ' руб.</td>';
-        echo '</tr>';
-    }
-    echo '</table>';
-}
-?>
+<table><tr><th>Артикул</th><th>Наименование</th><th>Категория</th><th>Отзывов</th><th>Цена</th></tr>
+<?php while ($row = mysqli_fetch_assoc($res)): ?>
+<tr>
+<td><?= e($row['art']) ?></td>
+<td><a href="product.php?id=<?= (int)$row['id'] ?>"><?= e($row['name']) ?></a></td>
+<td><?= e($row['cat_name']) ?></td>
+<td><?= (int)$row['cnt'] ?></td>
+<td><?= (int)$row['price'] ?> руб.</td>
+</tr>
+<?php endwhile; ?>
+</table>
 
 <div class="foot">
-Страница сгенерирована за <?php echo round(microtime(true) - $t_start, 3); ?> сек.
+Страница сгенерирована за <?= round(microtime(true) - $t_start, 3) ?> сек.
 </div>
 </div>
 </body>
